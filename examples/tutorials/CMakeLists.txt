@@ -42,3 +42,6 @@ target_link_libraries(nonlin_viscoelast_incompress AniFem++ Fem_utils AFSUNSolve
 
 add_executable(elastoplastic elastoplastic.cpp prob_args.h prob_args.cpp)
 target_link_libraries(elastoplastic AniFem++ Fem_utils)
+
+add_executable(laplace utils_laplace.cpp)
+target_link_libraries(laplace AniFem++ Fem_utils)

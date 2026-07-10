@@ -25,6 +25,16 @@ namespace Ani{
             m_dat[N*i + j] = m_dat[N*j + i] = r(i, j);
     }
     template<std::size_t N, typename FT>
+    inline SymMtx<N, FT>::SymMtx(std::array<FT, N*(N+1)/2> arr, bool row_major_upper_triag_mtx){
+        if (row_major_upper_triag_mtx) 
+            m_dat = std::move(arr);
+        else {
+            for (std::size_t i = 0; i < N; ++i)
+            for (std::size_t j = 0; j <= i; ++j)
+                m_dat[(2*N-1-j)*j/2 + i] = arr[i*(i+1)/2 + j];
+        }
+    }
+    template<std::size_t N, typename FT>
     inline SymMtx<N, FT> PhysMtx<N, FT>::Sym() const {
         SymMtx<N, FT> A;
         for (auto it = A.begin(); it != A.end(); ++it){
@@ -262,6 +272,14 @@ namespace Ani{
     PhysArr<N, FT> SymMtx<N, FT>::Mul(const PhysArr<N, FT>& v) const { return internal::Mul<N, SymMtx<N, FT>, PhysArr<N, FT>, FT>(*this, v); }
     
     template<std::size_t N, typename FT>
+    FT PhysArr<N, FT>::Dot(const PhysArr<N, FT>& b) const {
+        const PhysArr<N, FT>& a = *this;
+        FT v{};
+        for (std::size_t i = 0; i < a.continuous_size(); ++i) 
+            v += a[i]*b[i];
+        return v; 
+    }
+    template<std::size_t N, typename FT>
     FT PhysMtx<N, FT>::Dot(const PhysArr<N, FT>& f, const PhysArr<N, FT>& s) const { 
         FT r{};
         for (std::size_t i = 0; i < N; ++i)
@@ -310,6 +328,7 @@ namespace Ani{
 
     template<std::size_t N, typename FT>
     FT PhysMtx<N, FT>::Det() const {
+        using std::abs;
         FT max_val = abs(*std::max_element(cbegin(), cend(), [](const auto& a, const auto& b){ return abs(a) < abs(b); }));
         const FT eps = 100 * max_val * std::numeric_limits<FT>::epsilon();
 
@@ -341,6 +360,7 @@ namespace Ani{
 
     template<std::size_t N, typename FT>
     FT SymMtx<N, FT>::Det() const {
+        using std::abs;
         FT max_val = abs(*std::max_element(cbegin(), cend(), [](const auto& a, const auto& b){ return abs(a) < abs(b); }));
         const FT eps = 100 * max_val * std::numeric_limits<FT>::epsilon();
 
