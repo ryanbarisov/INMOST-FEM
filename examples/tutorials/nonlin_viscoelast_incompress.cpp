@@ -371,7 +371,7 @@ int main(int argc, char* argv[]){
     // pressure potential Wp
     auto Potential_P = [](PotentialParams prm, SymMtx3D<> E, double p_coef, unsigned char dif = 2){
         (void) prm;
-        return -p_coef*(Mech::J<>{dif, E} - 1);
+        return p_coef*(Mech::J<>{dif, E} - 1);
     };
     // elastic potential We
     auto Potential_E = [](PotentialParams prm, SymMtx3D<> E, unsigned char dif = 2) {
