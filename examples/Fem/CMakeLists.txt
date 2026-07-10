@@ -1,13 +1,13 @@
 project(FemInterfaces)
 
 add_executable(diffusion Ani/diffusion.cpp)
-target_link_libraries(diffusion AniFem++ Fem_utils)
+target_link_libraries(diffusion AniFem++ Fem_utils AFSUNSolver)
 
 add_executable(dyn_diffusion Ani/dyn_diffusion.cpp)
-target_link_libraries(dyn_diffusion AniFem++ Fem_utils stdc++fs)
+target_link_libraries(dyn_diffusion AniFem++ Fem_utils stdc++fs AFSUNSolver)
 
 add_executable(stokes-navier Ani/StokesNavier.cpp)
-target_link_libraries(stokes-navier AniFem++ Fem_utils stdc++fs)
+target_link_libraries(stokes-navier AniFem++ Fem_utils stdc++fs AFSUNSolver)
 
 set(FEM_EXAMPLES diffusion dyn_diffusion stokes-navier)
 

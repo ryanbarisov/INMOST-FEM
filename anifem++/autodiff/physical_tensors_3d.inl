@@ -272,7 +272,7 @@ struct PhysMtx<3, FT>{
     inline PhysArr<3, FT> Mul(const PhysArr<3, FT>& v) const;
     inline FT Dot(const PhysMtx<3, FT>& b) const;
     inline FT Dot(const PhysArr<3, FT>& f, const PhysArr<3, FT>& s) const;
-    inline PhysMtx<3, FT> operator*(const PhysMtx<3, FT>& a);
+    inline PhysMtx<3, FT> operator*(const PhysMtx<3, FT>& a) const;
     static PhysMtx<3, FT> Identity(FT val = FT(1)) { PhysMtx<3, FT> r; for (std::size_t i = 0; i < 3; ++i) r(i, i) = val; return r;}
     PhysMtx<3, FT> Transpose() const { return PhysMtx<3, FT>(m_dat.data(), false); }
     
@@ -394,7 +394,7 @@ inline FT PhysMtx<3, FT>::Dot(const PhysArr<3, FT>& f, const PhysArr<3, FT>& s) 
     return r;    
 }
 template<typename FT>
-inline PhysMtx<3, FT> PhysMtx<3, FT>::operator*(const PhysMtx<3, FT>& a){
+inline PhysMtx<3, FT> PhysMtx<3, FT>::operator*(const PhysMtx<3, FT>& a) const{
     const auto& m = *this;
     PhysMtx<3, FT> r;
     for(int i = 0; i < 3; ++i)
@@ -535,6 +535,7 @@ struct BiSymTensor4Rank<3, FT>{
     static inline BiSymTensor4Rank<3, FT> TensorSquare(const SymMtx<3, FT>& s);
     static inline BiSymTensor4Rank<3, FT> TensorSymMul2(const SymMtx<3, FT>& f, const SymMtx<3, FT>& s);
     static inline BiSymTensor4Rank<3, FT> Identity(FT val = FT(1));
+    inline SymMtx<3, FT> Mul(const SymMtx<3, FT>& s) const;
 
     inline BiSymTensor4Rank<3, FT>& operator+=(const BiSymTensor4Rank<3, FT>& a){ for (std::size_t i = 0; i < continuous_size(); ++i) m_dat[i] += a[i]; return *this; }
     inline BiSymTensor4Rank<3, FT>& operator-=(const BiSymTensor4Rank<3, FT>& a){ for (std::size_t i = 0; i < continuous_size(); ++i) m_dat[i] -= a[i]; return *this; }
@@ -587,6 +588,32 @@ BiSymTensor4Rank<3, FT> BiSymTensor4Rank<3, FT>::Identity(FT val){
        r(0, 0, 0, 0) = r(1, 1, 1, 1) = r(2, 2, 2, 2) = val    ;
        r(0, 1, 0, 1) = r(0, 2, 0, 2) = r(1, 2, 1, 2) = val / 2;
     return r;
+}
+
+// A_ij = R_ijkl S_kl
+template<typename FT>
+SymMtx<3, FT> BiSymTensor4Rank<3, FT>::Mul(const SymMtx<3, FT>& S) const
+{
+    auto& R = *this;
+    SymMtx<3, FT> A;
+
+    A(0,0) = R(0,0,0,0)*S(0,0) + 2*R(0,0,0,1)*S(0,1) + 2*R(0,0,0,2)*S(0,2) + R(0,0,1,1)*S(1,1) + 2*R(0,0,1,2)*S(1,2) + R(0,0,2,2)*S(2,2);
+    A(0,1) = R(0,1,0,0)*S(0,0) + 2*R(0,1,0,1)*S(0,1) + 2*R(0,1,0,2)*S(0,2) + R(0,1,1,1)*S(1,1) + 2*R(0,1,1,2)*S(1,2) + R(0,1,2,2)*S(2,2);
+    A(0,2) = R(0,2,0,0)*S(0,0) + 2*R(0,2,0,1)*S(0,1) + 2*R(0,2,0,2)*S(0,2) + R(0,2,1,1)*S(1,1) + 2*R(0,2,1,2)*S(1,2) + R(0,2,2,2)*S(2,2);
+    A(1,1) = R(1,1,0,0)*S(0,0) + 2*R(1,1,0,1)*S(0,1) + 2*R(1,1,0,2)*S(0,2) + R(1,1,1,1)*S(1,1) + 2*R(1,1,1,2)*S(1,2) + R(1,1,2,2)*S(2,2);
+    A(1,2) = R(1,2,0,0)*S(0,0) + 2*R(1,2,0,1)*S(0,1) + 2*R(1,2,0,2)*S(0,2) + R(1,2,1,1)*S(1,1) + 2*R(1,2,1,2)*S(1,2) + R(1,2,2,2)*S(2,2);
+    A(2,2) = R(2,2,0,0)*S(0,0) + 2*R(2,2,0,1)*S(0,1) + 2*R(2,2,0,2)*S(0,2) + R(2,2,1,1)*S(1,1) + 2*R(2,2,1,2)*S(1,2) + R(2,2,2,2)*S(2,2);
+    /*for (auto it = A.begin(); it != A.end(); ++it) {
+        auto q = it.index();
+        for(auto jt = S.begin(); jt != S.end(); ++jt)
+        {
+            auto p = jt.index();
+            *it += operator()(q.i, q.j, p.i, p.j) * (*jt)
+                * S.index_duplication(jt.continuous_index());
+        }
+    }*/
+
+    return A;
 }
 
 }

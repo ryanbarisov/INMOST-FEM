@@ -100,6 +100,16 @@ TEST(AutoDiffTest, TensorAlgebra){
             61, 67, 71, 73, 79, 83, 87
         }
     );
+    SymMtx3D<> E6(
+        std::array<double, 6>{
+            1, -2, 3, -4, 5, -6
+        }
+    );
+    SymMtx3D<> R_mul_E6(
+        std::array<double, 6>{
+            23, 65, 147, 169, 189, 231
+        }
+    );
 
     double R1[3][3][3][3];
     double R1_sq_nrm = 0;
@@ -131,6 +141,7 @@ TEST(AutoDiffTest, TensorAlgebra){
     EXPECT_NEAR((tensor_convert<decltype(R4)>(R) - R4).SquareFrobNorm(), 0, 100*std::numeric_limits<double>::epsilon());
     EXPECT_NEAR((tensor_convert<decltype(R)>(R3) - R).SquareFrobNorm(), 0, 100*std::numeric_limits<double>::epsilon());
     EXPECT_NEAR((tensor_convert<decltype(R)>(R3) - R).SquareFrobNorm(), 0, 100*std::numeric_limits<double>::epsilon());
+    EXPECT_NEAR((R.Mul(E6)-R_mul_E6).SquareFrobNorm(), 0, 100*std::numeric_limits<double>::epsilon());
 } 
 
 std::string to_short_str(const Ani::SymMtx3D<>& a){

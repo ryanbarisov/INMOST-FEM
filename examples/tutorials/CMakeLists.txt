@@ -37,5 +37,8 @@ target_link_libraries(nonlin_elast AniFem++ Fem_utils)
 add_executable(nonlin_elast_incompress nonlin_elast_incompress.cpp prob_args.h prob_args.cpp)
 target_link_libraries(nonlin_elast_incompress AniFem++ Fem_utils)
 
+add_executable(nonlin_viscoelast_incompress nonlin_viscoelast_incompress.cpp prob_args.h prob_args.cpp)
+target_link_libraries(nonlin_viscoelast_incompress AniFem++ Fem_utils AFSUNSolver)
+
 add_executable(elastoplastic elastoplastic.cpp prob_args.h prob_args.cpp)
 target_link_libraries(elastoplastic AniFem++ Fem_utils)

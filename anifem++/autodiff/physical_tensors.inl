@@ -279,7 +279,7 @@ namespace Ani{
         return r;    
     }
     template<std::size_t N, typename FT>
-    PhysMtx<N, FT> PhysMtx<N, FT>::operator*(const PhysMtx<N, FT>& a){
+    PhysMtx<N, FT> PhysMtx<N, FT>::operator*(const PhysMtx<N, FT>& a) const {
         PhysMtx<N, FT> r{};
         for (std::size_t i = 0; i < N; ++i)
         for (std::size_t j = 0; j < N; ++j)
@@ -288,7 +288,7 @@ namespace Ani{
         return r;    
     }
     template<std::size_t N, typename FT>
-    SymMtx<N, FT> SymMtx<N, FT>::operator*(const SymMtx<N, FT>& a){
+    SymMtx<N, FT> SymMtx<N, FT>::operator*(const SymMtx<N, FT>& a) const {
         SymMtx<N, FT> r{};
         for (std::size_t i = 0; i < N; ++i)
         for (std::size_t j = i; j < N; ++j)

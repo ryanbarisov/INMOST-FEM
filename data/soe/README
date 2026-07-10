@@ -1,0 +1,17 @@
+This folder contains the code to generate sum-of-exponents approximation tables for Caputo fractional derivative.
+Generated tables can be used with fractional derivative nonlinear viscoelastic model, located in examples/tutorials/nonlin_viscoelast_incompress.cpp
+
+In order to run Python code using Linux/Ubuntu machine, you can use the following steps
+(steps below are run from this directory):
+
+- Prepare virtual environment for locally installed packages and activate it:
+	mkdir venv
+	python -m venv venv
+	source venv/bin/activate
+- Install required packages:
+	pip install -r requirements.txt
+- Run code in virtual environment (see source to override default parameters to adapt it for your case):
+	python baryrat_generate.py
+
+Code generates table for the order of Caputo fractional derivative alpha = [0.01 0.02 .. 0.99]
+

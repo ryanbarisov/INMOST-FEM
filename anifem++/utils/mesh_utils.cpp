@@ -165,7 +165,7 @@ void RepartMesh(Mesh* m, bool verbose){
 #if defined(USE_MPI)
     MPI_Comm_rank(INMOST_MPI_COMM_WORLD, &pRank);
     MPI_Comm_size(INMOST_MPI_COMM_WORLD, &pCount);
-    m->SetCommunicator(INMOST_MPI_COMM_WORLD);
+    if(pCount > 1) m->SetCommunicator(INMOST_MPI_COMM_WORLD);
 #endif
     // mesh repartition
 #ifdef USE_PARTITIONER

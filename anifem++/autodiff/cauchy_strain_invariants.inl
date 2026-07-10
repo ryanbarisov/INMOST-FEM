@@ -100,21 +100,40 @@ inline BiSym4Tensor3D<FT> C_I2_ddE() {
     
     return r;    
 }
+
+// d^2(C_I3) / dE_nj dE_ml = d(2 adj(C)_nj)/dE_ml = 4 d(adj(C)_nj) / dC_ml
+// adj(C) = C^2 - tr(C)*C + (tr(C)^2 - tr(C^2))/2 * I (Cayley-Hamilton theorem)
+// see 3x3 case in https://en.wikipedia.org/wiki/Adjugate_matrix#Cayley%E2%80%93Hamilton_formula
+// dC_ij / dC_kl = 1/2 (I_ik I_jl + I_il I_jk)
+// d(adj(C)_nj) / dC_ml = r_njml
+// r_njml = 1/2 (I_nm C_jl + I_jl C_nm - I_nm I_jl tr(C))
+//         +1/2 (I_nl C_jm + I_jm C_nl - I_nl I_jm tr(C))
+//            - (I_nj C_ml + I_ml C_nj - I_nj I_ml tr(C))
 template<typename FT>
 inline BiSym4Tensor3D<FT> C_I3_ddE(const SymMtx3D<FT>& E) {
     FT trE = E.Trace();
     const FT c = FT(4); // derivation factor
     BiSym4Tensor3D<FT> r;
     
+    // notation: different letters = different indices, no summation
+    // r_jjjj = 0
+    // r_jjjq = 1/2 (C_jq + C_jq - C_jq) = 0
+    // r_jjmm = tr(C) - (C_jj + C_mm) = (2 tr(E) + 3) - (2 E_jj + 1 + 2 E_mm + 1)
     r(0, 0, 1, 1) = ( (1 + 2*trE) - 2 * (E(1, 1) + E(0, 0)))*c;
     r(0, 0, 2, 2) = ( (1 + 2*trE) - 2 * (E(2, 2) + E(0, 0)))*c;
     r(1, 1, 2, 2) = ( (1 + 2*trE) - 2 * (E(2, 2) + E(1, 1)))*c;
+    // r_njnj = r_jnjn = r_njjn
+    // r_njnj = 1/2(C_jj + C_nn - tr(C)) = -r_nnjj/2
     r(0, 1, 0, 1) = (-(1 + 2*trE) / 2 + (E(1, 1) + E(0, 0)))*c;
     r(0, 2, 0, 2) = (-(1 + 2*trE) / 2 + (E(2, 2) + E(0, 0)))*c;
     r(1, 2, 1, 2) = (-(1 + 2*trE) / 2 + (E(2, 2) + E(1, 1)))*c;
+    // r_njnl = r_njln = r_jnnl = r_jnln
+    // r_njnl = 1/2 C_jl = E_jl
     r(0, 1, 1, 2) = (                   E(0, 2)            )*c;
     r(0, 1, 0, 2) = (                   E(1, 2)            )*c;
     r(0, 2, 1, 2) = (                   E(0, 1)            )*c;
+    // r_nnml = r_mlnn
+    // r_nnml = -C_ml = -2*r_nmnl
     r(0, 0, 1, 2) = (              -2 * E(1, 2)            )*c;
     r(0, 2, 1, 1) = (              -2 * E(0, 2)            )*c;
     r(0, 1, 2, 2) = (              -2 * E(0, 1)            )*c;

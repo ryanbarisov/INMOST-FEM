@@ -150,7 +150,7 @@ struct SymMtx{
     static SymMtx<N, FT> Identity(FT val = FT(1)) { SymMtx<N, FT> r; for (std::size_t i = 0; i < N; ++i) r(i, i) = val; return r;}
     /// @brief Matrix product
     /// @return m = this * a
-    inline SymMtx<N, FT> operator*(const SymMtx<N, FT>& a);
+    inline SymMtx<N, FT> operator*(const SymMtx<N, FT>& a) const;
     SymMtx<N, FT> Transpose() const { return *this; }
     
     inline SymMtx<N, FT>& operator+=(const SymMtx<N, FT>& a){ for (std::size_t i = 0; i < continuous_size(); ++i) m_dat[i] += a[i]; return *this; }
@@ -210,7 +210,7 @@ struct PhysMtx{
     inline PhysArr<N, FT> Mul(const PhysArr<N, FT>& v) const;
     inline FT Dot(const PhysMtx<N, FT>& b) const;
     inline FT Dot(const PhysArr<N, FT>& f, const PhysArr<N, FT>& s) const;
-    inline PhysMtx<N, FT> operator*(const PhysMtx<N, FT>& a);
+    inline PhysMtx<N, FT> operator*(const PhysMtx<N, FT>& a) const;
     static PhysMtx<N, FT> Identity(FT val = FT(1)) { PhysMtx<N, FT> r; for (std::size_t i = 0; i < N; ++i) r(i, i) = val; return r;}
     PhysMtx<N, FT> Transpose() const { return PhysMtx<N, FT>(m_dat.data(), false); }
     
