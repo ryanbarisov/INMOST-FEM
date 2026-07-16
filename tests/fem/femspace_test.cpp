@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <vector>
 #include "anifem++/fem/fem_space.h"
+#include "anifem++/fem/quadrature_formulas.h"
+#include "anifem++/fem/geometry.h"
 #include "anifem++/fem/spaces/spaces.h"
 #include "anifem++/fem/operations/operations.h"
 
@@ -204,11 +209,12 @@ TEST(AniInterface, FemSpace){
 
         //compound femspace interpolate tests
         check_interpolation(MINI1, f, sp, {0, 2, 1, 2, 0}, false);
-        check_interpolation(MINI1, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 1.25}, false);
+        // Dynamic Union mixes functionals: bubble coeff of linear f is corrected to 0
+        check_interpolation(MINI1, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0}, false);
         check_interpolationT(Mini1T{}, f, sp, {0, 2, 1, 2, 0}, false);
-        check_interpolationT(Mini1T{}, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 1.25}, false);
-        check_interpolation(MINI2, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0, 0, 0, 1.5, 2, 1.5, 1.25}, false);
-        check_interpolationT(Mini2T{}, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0, 0, 0, 1.5, 2, 1.5, 1.25}, false);
+        check_interpolationT(Mini1T{}, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0}, false);
+        check_interpolation(MINI2, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0, 0, 0, 1.5, 2, 1.5, 0}, false);
+        check_interpolationT(Mini2T{}, f, DofT::TetGeomSparsity().setFace(1, true).setCell(), {0, 2, 1, 2, 0, 0, 0, 1.5, 2, 1.5, 0}, false);
         auto P123dofs = std::vector<double>{0,2,1,2, 0,2,5,5,0,0,0,3.25,3.25,4.5, 0,3,3,3,0,0,0,0,0,0,29./9,29./9,3,3,29./9,29./9,0,29./9,0,0 };
         check_interpolation(P1*P2*P3, f, sp, P123dofs, false);
         check_interpolationT(FemCom<FemFix<FEM_P1>, FemFix<FEM_P2>, FemFix<FEM_P3>>{}, f, sp, P123dofs, false);

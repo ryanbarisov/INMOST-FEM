@@ -3,6 +3,9 @@
 #include "operations/operations.h"
 #include <stdexcept>
 #include <sstream>
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace Ani{
     void BaseFemSpace::interpolateOnDOF(const Tetra<const double>& XYZ, const EvalFunc& f, ArrayView<>* udofs, int idof_on_tet, int fusion, DynMem<>& wmem, void* user_data, uint max_quad_order) const{
@@ -453,7 +456,12 @@ namespace Ani{
             res.extend_size(lres);
         }
         res.dSize += vdim*ldim;
-        res.mSize += (sizeof(ArrayView<>)*vdim) / sizeof(DenseMatrix<>) + 1 + std::max(1UL, sizeof(ArrayView<>)/sizeof(DenseMatrix<>));
+        {
+            // Reserve mdata space for ArrayView[vdim] plus alignment padding before the remaining DenseMatrix region.
+            const std::size_t av_bytes = sizeof(ArrayView<>) * static_cast<std::size_t>(vdim);
+            const std::size_t pad = (alignof(ArrayView<>) - 1) + (alignof(DenseMatrix<>) - 1);
+            res.mSize += (av_bytes + pad + sizeof(DenseMatrix<>) - 1) / sizeof(DenseMatrix<>);
+        }
         return res; 
     }
     void VectorFemSpace::interpolateByDOFs(const Tetra<const double>& XYZ, const EvalFunc& f, ArrayView<> udofs, const TetGeomSparsity& sp, PlainMemoryX<> mem, void* user_data, uint max_quad_order) const{
@@ -462,15 +470,30 @@ namespace Ani{
         auto lnfa = m_base->m_order.NumDofOnTet();
         ArrayView<>* new_udofs = nullptr;
         {
-            void* storage = mem.mdata;
-            std::size_t remain = mem.mSize * sizeof(DenseMatrix<>);
-            void* p = std::align(alignof(ArrayView<>), sizeof(ArrayView<>)*vdim, storage, remain);
+            char* const storage_begin = reinterpret_cast<char*>(mem.mdata);
+            const std::size_t total_bytes = mem.mSize * sizeof(DenseMatrix<>);
+            char* const buffer_end = storage_begin + total_bytes;
+
+            void* storage = storage_begin;
+            std::size_t remain = total_bytes;
+            void* p = std::align(alignof(ArrayView<>), sizeof(ArrayView<>) * vdim, storage, remain);
             assert(p != nullptr && "Error arised while memory allocation");
-            std::size_t rem1 = remain + sizeof(DenseMatrix<>) - (static_cast<char*>(p) - static_cast<char*>(storage));
-            mem.mdata = static_cast<DenseMatrix<>*>(std::align(alignof(DenseMatrix<>), sizeof(DenseMatrix<>), p, rem1));
-            assert(mem.mdata != nullptr && "Error arised while matrix memory allocation");
-            mem.mSize -= mem.mdata - static_cast<DenseMatrix<>*>(storage);
             new_udofs = static_cast<ArrayView<>*>(p);
+
+            // Place remaining DenseMatrix workspace after the ArrayView array (no overlap).
+            void* after_views = static_cast<char*>(p) + sizeof(ArrayView<>) * vdim;
+            std::size_t remain_after = buffer_end > static_cast<char*>(after_views)
+                ? static_cast<std::size_t>(buffer_end - static_cast<char*>(after_views)) : 0;
+            void* mtx_storage = after_views;
+            if (remain_after >= sizeof(DenseMatrix<>)) {
+                mem.mdata = static_cast<DenseMatrix<>*>(
+                    std::align(alignof(DenseMatrix<>), sizeof(DenseMatrix<>), mtx_storage, remain_after));
+                assert(mem.mdata != nullptr && "Error arised while matrix memory allocation");
+                mem.mSize = (buffer_end - reinterpret_cast<char*>(mem.mdata)) / sizeof(DenseMatrix<>);
+            } else {
+                mem.mdata = nullptr;
+                mem.mSize = 0;
+            }
         }
         for (int i = 0; i < vdim; ++i)
             new_udofs[i] = ArrayView<>(udofs.data + i*lnfa, lnfa);
@@ -919,27 +942,67 @@ namespace Ani{
             m_subsets[i]->evalBasisFunctions(lmb, grad_lmb, phi + shift);
             shift += m_subsets[i]->m_order.NumDofOnTet();
         }
-        uint nf = m_order.NumDofOnTet();
-        std::vector<Expr> w(nf);
-        for (uint i = 0; i < nf; ++i)
-            w[i] = FT::scalsum(phi, phi+nf, m_orth_coefs.data() + i*nf);
-        for (uint i = 0; i < nf; ++i)
-            phi[i] = std::move(w[i]);
     }
     PlainMemoryX<> UnionFemSpace::interpolateOnDOF_mem_req(int idof_on_tet, int fusion, uint max_quad_order) const{
-        auto comp = m_order.target<DofT::ComplexDofMap>()->ComponentID(idof_on_tet);
-        uint nsubset = comp.part_id;
-        return m_subsets[nsubset]->interpolateOnDOF_mem_req(idof_on_tet, fusion, max_quad_order);
+        PlainMemoryX<> req;
+        if (m_subsets.empty() || m_orth_coefs.empty())
+            return req;
+        uint nf = m_order.NumDofOnTet();
+        auto* cmap = m_order.target<DofT::ComplexDofMap>();
+        uint max_nfi = 0;
+        for (uint j = 0; j < nf; ++j){
+            if (m_orth_coefs[idof_on_tet + nf * j] == 0.0)
+                continue;
+            auto comp = cmap->ComponentID(j);
+            uint nsubset = comp.part_id;
+            uint ldof_id = comp.cgid;
+            max_nfi = std::max(max_nfi, m_subsets[nsubset]->m_order.NumDofOnTet());
+            req.extend_size(m_subsets[nsubset]->interpolateOnDOF_mem_req(ldof_id, fusion, max_quad_order));
+        }
+        req.dSize += static_cast<std::size_t>(fusion) * max_nfi;
+        return req;
     }
     void UnionFemSpace::interpolateOnDOF(const Tetra<const double>& XYZ, const EvalFunc& f, ArrayView<>* udofs, int idof_on_tet, int fusion, PlainMemoryX<> mem, void* user_data, uint max_quad_order) const{
         assert(mem.ge(interpolateOnDOF_mem_req(idof_on_tet, fusion, max_quad_order)) && "Not enough of work memory");
-        auto comp = m_order.target<DofT::ComplexDofMap>()->ComponentID(idof_on_tet);
-        uint nsubset = comp.part_id, ldof_id = comp.cgid, lshift = idof_on_tet - comp.cgid;
+        if (m_subsets.empty() || m_orth_coefs.empty())
+            return;
+        uint nf = m_order.NumDofOnTet();
+        auto* cmap = m_order.target<DofT::ComplexDofMap>();
+        uint max_nfi = 0;
+        for (uint j = 0; j < nf; ++j){
+            if (m_orth_coefs[idof_on_tet + nf * j] == 0.0)
+                continue;
+            auto comp = cmap->ComponentID(j);
+            max_nfi = std::max(max_nfi, m_subsets[comp.part_id]->m_order.NumDofOnTet());
+        }
+        if (max_nfi == 0)
+            return;
+
+        PlainMemoryX<> work = mem;
+        double* temp = work.ddata;
+        work.ddata += static_cast<std::size_t>(fusion) * max_nfi;
+        work.dSize -= static_cast<std::size_t>(fusion) * max_nfi;
+
+        std::vector<double> acc(static_cast<std::size_t>(fusion), 0.0);
+        std::vector<ArrayView<>> tmp_udofs(static_cast<std::size_t>(fusion));
         for (int r = 0; r < fusion; ++r)
-            udofs[r] = ArrayView<>(udofs[r].data + lshift, udofs[r].size - lshift);
-        m_subsets[nsubset]->interpolateOnDOF(XYZ, f, udofs, ldof_id, fusion, mem, user_data, max_quad_order);    
+            tmp_udofs[r] = ArrayView<>(temp + static_cast<std::size_t>(r) * max_nfi, max_nfi);
+
+        for (uint j = 0; j < nf; ++j){
+            double w = m_orth_coefs[idof_on_tet + nf * j];
+            if (w == 0.0)
+                continue;
+            auto comp = cmap->ComponentID(j);
+            uint nsubset = comp.part_id;
+            uint ldof_id = comp.cgid;
+            for (int r = 0; r < fusion; ++r)
+                std::fill(tmp_udofs[r].data, tmp_udofs[r].data + max_nfi, 0.0);
+            m_subsets[nsubset]->interpolateOnDOF(XYZ, f, tmp_udofs.data(), ldof_id, fusion, work, user_data, max_quad_order);
+            for (int r = 0; r < fusion; ++r)
+                acc[r] += w * tmp_udofs[r][ldof_id];
+        }
         for (int r = 0; r < fusion; ++r)
-            udofs[r] = ArrayView<>(udofs[r].data - lshift, udofs[r].size + lshift);     
+            udofs[r][idof_on_tet] = acc[r];
     }
     void UnionFemSpace::setup(){
         std::vector<DofT::DofMap> m_dof_maps(m_subsets.size());
@@ -950,7 +1013,7 @@ namespace Ani{
             m_dof_maps[i] = m_subsets[i]->m_order;
         }
         m_order = DofT::merge(m_dof_maps);
-        orthogonalize();
+        setupInterpolation();
     } 
     DenseMatrix<const double> UnionFemSpace::GetOrthBasisShiftMatrix() const {
         if (m_orth_coefs.empty())
@@ -960,12 +1023,18 @@ namespace Ani{
             return DenseMatrix<const double>(m_orth_coefs.data(), nf, nf);
         }    
     }
-    void UnionFemSpace::orthogonalize(uint max_quad_order){
-        if (m_subsets.size() <= 1) return;
-
+    void UnionFemSpace::setupInterpolation(uint max_quad_order){
         uint nf = m_order.NumDofOnTet();
+        m_orth_coefs.assign(nf * nf, 0.0);
+        if (nf == 0)
+            return;
+        if (m_subsets.size() <= 1){
+            for (uint i = 0; i < nf; ++i)
+                m_orth_coefs[i + nf * i] = 1.0;
+            return;
+        }
+
         std::vector<double> Bd(nf*nf, 0.0);
-        m_orth_coefs.resize(nf*nf);
         DenseMatrix<> B(Bd.data(), nf, nf);
         uint nfshi = 0, nfshj = 0;
         double XYZa[3 * 4]{0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1};
@@ -1019,8 +1088,8 @@ namespace Ani{
             mem.XYG.Init(x.data(), 3);
             mem.XYL[0] = 1 - (x[0] + x[1] + x[2]);
             for (int k = 0; k < 3; ++k) mem.XYL[1+k] = x[k];
-            uint dim = s.dim(), nf = s.m_order.NumDofOnTet();
-            std::fill(phi, phi + dim*nf, 0);
+            uint dim = s.dim(), snf = s.m_order.NumDofOnTet();
+            std::fill(phi, phi + dim*snf, 0);
             auto res = s.applyIDEN(mem, mem.U);
             for (std::size_t p = 0; p < res.nparts; ++p)
             for (int d = res.stRow[p]; d < res.stRow[p+1]; ++d)
@@ -1061,10 +1130,28 @@ namespace Ani{
         }
         DenseMatrix<> A(m_orth_coefs.data(), nf, nf);
         {
-            std::vector<double> mem(2*nf*nf);
+            std::vector<double> wmem(2*nf*nf);
             std::vector<int> imem(2*nf);
-            fullPivLU_inverse(B.data, A.data, nf, mem.data(), imem.data());
+            fullPivLU_inverse(B.data, A.data, nf, wmem.data(), imem.data());
         }
+
+        // Verify W*G ≈ I; throw if bases/functionals are linearly dependent
+        {
+            double max_err = 0.0, max_g = 0.0;
+            for (uint i = 0; i < nf; ++i)
+            for (uint k = 0; k < nf; ++k){
+                double s = 0.0;
+                for (uint j = 0; j < nf; ++j)
+                    s += A(i, j) * B(j, k);
+                double target = (i == k) ? 1.0 : 0.0;
+                max_err = std::max(max_err, std::abs(s - target));
+                max_g = std::max(max_g, std::abs(B(i, k)));
+            }
+            const double tol = 1e-8;
+            if (max_err > tol * (1.0 + max_g))
+                throw std::runtime_error("UnionFemSpace: input bases or interpolating functionals are linearly dependent (Gram matrix is singular)");
+        }
+
         for (uint i = 0; i < nf; ++i){
             auto p = std::max_element(A.data + i*nf, A.data + (i+1)*nf, [](double a, double b){ return std::abs(a) < std::abs(b); });
             std::transform(A.data + i*nf, A.data + (i+1)*nf, A.data + i*nf, [m = std::abs(*p)](double a){ return (std::abs(a) > m*1e-7) ? a : 0.0; });

@@ -12,11 +12,16 @@
 #include <algorithm> 
 #include <stdexcept>
 #include <cmath>
+#include <limits>
 
 #include "fem_memory.h"
 
+#ifndef ANIFEM_JACOBI_MAX_SWEEPS
+#define ANIFEM_JACOBI_MAX_SWEEPS 50
+#endif
+
 namespace Ani{
-    ///@return determinant of input matrix
+    /// @return determinant of input matrix
     template<typename Scalar>
     inline Scalar inverse3x3(const Scalar* m, Scalar* inv){
 #define ID(I, J) (I) + 3*(J)
@@ -197,11 +202,11 @@ namespace Ani{
     
     /// @brief Solve the problem AX = B for A=A^T > 0
     /// @param A is square symmetric positive definite matrix of NxN size
-    /// @param B is matrix of right-hand side of NxM size
+    /// @param B is col-major matrix of right-hand side of NxM size
     /// @param N is dimesion of the problem
     /// @param M is count of columns in B matrix 
-    /// @param X is memory for solution, may coincide with B
-    /// @param mem additional memory of size N*(N+1)/2 for work, may coinside with A
+    /// @param X is memory for col-major solution, may coincide with B
+    /// @param mem additional memory of size N*(N+1)/2 for work, may coincide with A
     template<typename Scalar>
     inline void cholesky_solve(const Scalar* A, const Scalar* B, int N, int M, Scalar* X, Scalar* mem){
     #ifdef WITH_EIGEN
@@ -252,7 +257,7 @@ namespace Ani{
     /// @param A is square symmetric positive definite matrix of NxN size
     /// @param Inv is memory for NxN matrix result
     /// @param N is dimension of problem
-    /// @param mem additional memory of size N*(N+1)/2 for work, may coinside with A
+    /// @param mem additional memory of size N*(N+1)/2 for work, may coincide with A
     template<typename Scalar>
     inline void cholesky_inverse(const Scalar* A, Scalar* Inv, int N, Scalar* mem){
         std::fill(Inv, Inv + N*N, 0);
@@ -352,11 +357,11 @@ namespace Ani{
     }
 
     /// @brief Solve the problem AX = B for sqaure dense matrix using LU decomposition
-    /// @param A is square matrix of NxN size
-    /// @param B is matrix of right-hand side of NxM size
+    /// @param A is square col-major matrix of NxN size
+    /// @param B is col-major matrix of right-hand side of NxM size
     /// @param N is dimesion of the problem
     /// @param M is count of columns in B matrix 
-    /// @param X is memory for solution, may coincide with B
+    /// @param X is memory for col-major solution, may coincide with B
     /// @param mem additional real memory of size N*(N+M) for work
     /// @param imem additional integer memory of size 2*N for work
     template<typename Scalar>
@@ -379,8 +384,8 @@ namespace Ani{
 #endif
     }
     /// @brief Compute A^{-1} for dense matrix using LU decomposition
-    /// @param A is matrix of NxN size
-    /// @param Inv is memory for NxN matrix result, may coinside with A
+    /// @param A is col-major matrix of NxN size
+    /// @param Inv is memory for NxN col-major matrix result, may coincide with A
     /// @param N is dimension of problem
     /// @param mem additional memory of size 2*N*N for work
     /// @param imem additional integer memory of size 2*N for work
@@ -397,6 +402,329 @@ namespace Ani{
         for (int i = 0; i < N; ++i)
             Inv[i+i*N] = 1;
         fullPivLU_solve(A, Inv, N, N, Inv, mem, imem);
+#endif
+    }
+
+    /// @brief Compute Householder QR decomposition of dense matrix A = Q[1:N, 1:M] * R[1:M, 1:M]
+    /// @param A is a col-major matrix of NxM size, N >= M
+    /// @param N is number of rows in A
+    /// @param M is number of cols in A
+    /// @param Q is memory for NxN orthonormal col-major matrix result
+    /// @param R is memory for MxM col-major matrix result
+    /// @param mem additional real memory of size N*M + N + M for work
+    template<typename Scalar>
+    inline void householderQR(const Scalar* A, int N, int M, Scalar* Q, Scalar* R, Scalar* mem){
+#ifdef WITH_EIGEN
+        (void) mem;
+        using namespace Eigen;
+        const Map<const MatrixX<Scalar>> Am(A, N, M);
+        HouseholderQR<MatrixX<Scalar>> qr(Am);
+        Map<MatrixX<Scalar>> Qm(Q, N, N);
+        Map<MatrixX<Scalar>> Rm(R, M, M);
+        Qm = qr.householderQ();
+        Rm = qr.matrixQR().topLeftCorner(M, M).template triangularView<Upper>();
+#else
+        #define W(i, j) mem[(i) + (j)*N]
+        Scalar* tau = mem + N*M + N;
+        Scalar* v = mem + N*M;
+
+        std::copy(A, A + N*M, mem);
+
+        for (int k = 0; k < M; ++k){
+            Scalar norm = 0;
+            for (int i = k; i < N; ++i)
+                norm += W(i, k) * W(i, k);
+            norm = std::sqrt(norm);
+            if (norm <= std::numeric_limits<Scalar>::epsilon()){
+                tau[k] = 0;
+                v[k] = 1;
+                for (int i = k + 1; i < N; ++i)
+                    v[i] = 0;
+                continue;
+            }
+
+            Scalar alpha = W(k, k);
+            Scalar beta = (alpha >= 0) ? -norm : norm;
+            tau[k] = (beta - alpha) / beta;
+            Scalar inv_denom = Scalar(1) / (alpha - beta);
+            v[k] = 1;
+            for (int i = k + 1; i < N; ++i)
+                v[i] = W(i, k) * inv_denom;
+
+            W(k, k) = beta;
+            for (int i = k + 1; i < N; ++i)
+                W(i, k) = v[i];
+
+            for (int j = k + 1; j < M; ++j){
+                Scalar dot = v[k] * W(k, j);
+                for (int i = k + 1; i < N; ++i)
+                    dot += v[i] * W(i, j);
+                dot *= tau[k];
+                W(k, j) -= dot * v[k];
+                for (int i = k + 1; i < N; ++i)
+                    W(i, j) -= dot * v[i];
+            }
+        }
+
+        for (int j = 0; j < M; ++j)
+            for (int i = 0; i < M; ++i)
+                R[i + j*M] = (i <= j) ? W(i, j) : 0;
+
+        for (int j = 0; j < N; ++j)
+            for (int i = 0; i < N; ++i)
+                Q[i + j*N] = (i == j) ? 1 : 0;
+
+        for (int k = M - 1; k >= 0; --k){
+            if (tau[k] == 0)
+                continue;
+            v[k] = 1;
+            for (int i = k + 1; i < N; ++i)
+                v[i] = W(i, k);
+            for (int j = 0; j < N; ++j){
+                Scalar dot = v[k] * Q[k + j*N];
+                for (int i = k + 1; i < N; ++i)
+                    dot += v[i] * Q[i + j*N];
+                dot *= tau[k];
+                Q[k + j*N] -= dot * v[k];
+                for (int i = k + 1; i < N; ++i)
+                    Q[i + j*N] -= dot * v[i];
+            }
+        }
+        #undef W
+#endif
+    }
+
+#ifndef WITH_EIGEN
+    namespace detail {
+        template<typename Scalar>
+        inline int jacobi_symmetric_eigen(Scalar* sym, int n, Scalar* eval, Scalar* evecs){
+            for (int j = 0; j < n; ++j)
+                for (int i = 0; i < n; ++i)
+                    evecs[i + j*n] = (i == j) ? 1 : 0;
+
+            const Scalar tol = Scalar(10) * n * n * std::numeric_limits<Scalar>::epsilon();
+            int err = 1;
+            for (int sweep = 0; sweep < ANIFEM_JACOBI_MAX_SWEEPS; ++sweep){
+                Scalar off = 0;
+                for (int p = 0; p < n; ++p)
+                    for (int q = p + 1; q < n; ++q)
+                        off += sym[p + q*n] * sym[p + q*n];
+                if (off <= tol * tol){
+                    err = 0;
+                    break;
+                }
+
+                for (int p = 0; p < n; ++p){
+                    for (int q = p + 1; q < n; ++q){
+                        Scalar apq = sym[p + q*n];
+                        if (std::fabs(apq) <= tol)
+                            continue;
+                        Scalar app = sym[p + p*n];
+                        Scalar aqq = sym[q + q*n];
+                        Scalar theta = Scalar(0.5) * std::atan2(Scalar(2) * apq, aqq - app);
+                        Scalar c = std::cos(theta);
+                        Scalar s = std::sin(theta);
+
+                        for (int k = 0; k < n; ++k){
+                            if (k == p || k == q)
+                                continue;
+                            Scalar gkp = sym[k + p*n];
+                            Scalar gkq = sym[k + q*n];
+                            sym[k + p*n] = sym[p + k*n] = c * gkp - s * gkq;
+                            sym[k + q*n] = sym[q + k*n] = s * gkp + c * gkq;
+                        }
+                        sym[p + p*n] = c*c*app - Scalar(2)*s*c*apq + s*s*aqq;
+                        sym[q + q*n] = s*s*app + Scalar(2)*s*c*apq + c*c*aqq;
+                        sym[p + q*n] = sym[q + p*n] = 0;
+
+                        for (int k = 0; k < n; ++k){
+                            Scalar vkp = evecs[k + p*n];
+                            Scalar vkq = evecs[k + q*n];
+                            evecs[k + p*n] = c * vkp - s * vkq;
+                            evecs[k + q*n] = s * vkp + c * vkq;
+                        }
+                    }
+                }
+            }
+
+            if (err)
+                return 1;
+
+            for (int i = 0; i < n; ++i)
+                eval[i] = sym[i + i*n];
+            return 0;
+        }
+
+        template<typename Scalar>
+        inline void sort_eigen_desc(Scalar* eval, Scalar* evecs, int n){
+            for (int i = 0; i < n; ++i){
+                int best = i;
+                for (int j = i + 1; j < n; ++j)
+                    if (eval[j] > eval[best])
+                        best = j;
+                if (best == i)
+                    continue;
+                std::swap(eval[i], eval[best]);
+                for (int k = 0; k < n; ++k)
+                    std::swap(evecs[k + i*n], evecs[k + best*n]);
+            }
+        }
+
+        template<typename Scalar>
+        inline void complete_orthonormal_cols(Scalar* q, int n, int n_done){
+            const Scalar eps = std::numeric_limits<Scalar>::epsilon();
+            for (int j = n_done; j < n; ++j){
+                for (int i = 0; i < n; ++i)
+                    q[i + j*n] = (i == (j - n_done) % n) ? 1 : 0;
+                for (int c = 0; c < j; ++c){
+                    Scalar dot = 0;
+                    for (int i = 0; i < n; ++i)
+                        dot += q[i + c*n] * q[i + j*n];
+                    for (int i = 0; i < n; ++i)
+                        q[i + j*n] -= dot * q[i + c*n];
+                }
+                Scalar norm = 0;
+                for (int i = 0; i < n; ++i)
+                    norm += q[i + j*n] * q[i + j*n];
+                norm = std::sqrt(norm);
+                if (norm <= eps){
+                    for (int i = 0; i < n; ++i)
+                        q[i + j*n] = (i == (j + 1) % n) ? 1 : 0;
+                    for (int c = 0; c < j; ++c){
+                        Scalar dot = 0;
+                        for (int i = 0; i < n; ++i)
+                            dot += q[i + c*n] * q[i + j*n];
+                        for (int i = 0; i < n; ++i)
+                            q[i + j*n] -= dot * q[i + c*n];
+                    }
+                    norm = 0;
+                    for (int i = 0; i < n; ++i)
+                        norm += q[i + j*n] * q[i + j*n];
+                    norm = std::sqrt(norm);
+                }
+                if (norm > eps)
+                    for (int i = 0; i < n; ++i)
+                        q[i + j*n] /= norm;
+            }
+        }
+
+        template<typename Scalar>
+        inline void gram_ata(const Scalar* a, int n, int m, Scalar* g){
+            for (int j = 0; j < m; ++j){
+                for (int k = j; k < m; ++k){
+                    Scalar s = 0;
+                    for (int i = 0; i < n; ++i)
+                        s += a[i + j*n] * a[i + k*n];
+                    g[j + k*m] = g[k + j*m] = s;
+                }
+            }
+        }
+
+        template<typename Scalar>
+        inline void gram_aat(const Scalar* a, int n, int m, Scalar* g){
+            for (int j = 0; j < n; ++j){
+                for (int k = j; k < n; ++k){
+                    Scalar s = 0;
+                    for (int i = 0; i < m; ++i)
+                        s += a[j + i*n] * a[k + i*n];
+                    g[j + k*n] = g[k + j*n] = s;
+                }
+            }
+        }
+    }
+#endif
+
+    /// @brief Compute SVD of dense col-major matrix A = U * diag(S) * V^T
+    /// @param A col-major matrix of N x M size
+    /// @param N number of rows
+    /// @param M number of columns
+    /// @param U optional memory for N x N orthogonal matrix (col-major), nullptr to skip
+    /// @param S memory for min(N, M) singular values in decreasing order
+    /// @param V optional memory for M x M orthogonal matrix (col-major), nullptr to skip
+    /// @param mem additional real memory of size 2*min(N,M)^2 + min(N,M) for work
+    /// @return 0 on success, 1 if Jacobi eigensolver failed to converge
+    template<typename Scalar>
+    inline int jacobiSVD(const Scalar* A, int N, int M, Scalar* U, Scalar* S, Scalar* V, Scalar* mem){
+        const int K = std::min(N, M);
+#ifdef WITH_EIGEN
+        (void) mem;
+        using namespace Eigen;
+        const Map<const MatrixX<Scalar>> Am(A, N, M);
+        int flags = 0;
+        if (U)
+            flags |= ComputeFullU;
+        if (V)
+            flags |= ComputeFullV;
+        JacobiSVD<MatrixX<Scalar>> svd(Am, flags);
+        for (int i = 0; i < K; ++i)
+            S[i] = svd.singularValues()[i];
+        if (U){
+            Map<MatrixX<Scalar>> Um(U, N, N);
+            Um = svd.matrixU();
+        }
+        if (V){
+            Map<MatrixX<Scalar>> Vm(V, M, M);
+            Vm = svd.matrixV();
+        }
+        return 0;
+#else
+        const Scalar eps = std::numeric_limits<Scalar>::epsilon();
+        Scalar* gram = mem;
+        Scalar* evecs_buf = mem + K*K;
+        Scalar* eval = mem + 2*K*K;
+
+        if (N >= M){
+            detail::gram_ata(A, N, M, gram);
+            Scalar* evecs = (V != nullptr) ? V : evecs_buf;
+            if (detail::jacobi_symmetric_eigen(gram, M, eval, evecs))
+                return 1;
+            detail::sort_eigen_desc(eval, evecs, M);
+            for (int i = 0; i < K; ++i)
+                S[i] = std::sqrt(std::max(Scalar(0), eval[i]));
+
+            if (U != nullptr){
+                for (int j = 0; j < M; ++j){
+                    if (S[j] > eps){
+                        for (int i = 0; i < N; ++i){
+                            Scalar sum = 0;
+                            for (int t = 0; t < M; ++t)
+                                sum += A[i + t*N] * evecs[t + j*M];
+                            U[i + j*N] = sum / S[j];
+                        }
+                    } else {
+                        for (int i = 0; i < N; ++i)
+                            U[i + j*N] = 0;
+                    }
+                }
+                detail::complete_orthonormal_cols(U, N, M);
+            }
+        } else {
+            detail::gram_aat(A, N, M, gram);
+            Scalar* evecs = (U != nullptr) ? U : evecs_buf;
+            if (detail::jacobi_symmetric_eigen(gram, N, eval, evecs))
+                return 1;
+            detail::sort_eigen_desc(eval, evecs, N);
+            for (int i = 0; i < K; ++i)
+                S[i] = std::sqrt(std::max(Scalar(0), eval[i]));
+
+            if (V != nullptr){
+                for (int j = 0; j < N; ++j){
+                    if (S[j] > eps){
+                        for (int i = 0; i < M; ++i){
+                            Scalar sum = 0;
+                            for (int t = 0; t < N; ++t)
+                                sum += A[t + i*N] * evecs[t + j*N];
+                            V[i + j*M] = sum / S[j];
+                        }
+                    } else {
+                        for (int i = 0; i < M; ++i)
+                            V[i + j*M] = 0;
+                    }
+                }
+                detail::complete_orthonormal_cols(V, M, N);
+            }
+        }
+        return 0;
 #endif
     }
 };
